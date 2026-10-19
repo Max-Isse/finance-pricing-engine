@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.fin_pricing/
+.venv/
+.ipynb_checkpoints/
+data/*.csv
+.env
