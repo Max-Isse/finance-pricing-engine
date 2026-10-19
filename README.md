@@ -2,7 +2,7 @@
 
 The production plumbing around a pricing model: data-quality gates, drift monitoring, a fallback feed when upstream data fails, and a containerised service with a Redis cache. The pricing model itself is a small PyTorch network whose output is adjusted by a macro input (the 10-year Treasury yield).
 
-> **Status: work in progress.** The monitoring, fallback and container pieces run. Retraining, intraday recalibration, the feature store and the tests are placeholders. The table below shows exactly what works today. All data is simulated; nothing here uses real market data.
+> **Status: work in progress.** The drift monitor, fallback feed and model forward pass run; the CI gate and containers are defined. Retraining, intraday recalibration, the feature store and the tests are placeholders. The table below shows exactly what works today. All data is simulated; nothing here uses real market data.
 
 ## What works today
 
@@ -11,8 +11,8 @@ The production plumbing around a pricing model: data-quality gates, drift monito
 | Drift monitor: population stability index (PSI) between a baseline and a live feature distribution, written to Redis | `monitoring/drift_monitors.py` | Runs. On its simulated example (yields shifted from 4.1% to 4.9%) it reports PSI ≈ 14.1, far above the usual 0.25 alert level. |
 | Fallback feed: writes a last-known-good market snapshot (10y yield, implied volatility, spread) when upstream data fails | `pipelines/fallback_injector.py` | Runs |
 | Data-quality expectations: 10y yield not null, implied volatility between 2% and 180% | `config/expectations_macro.json` | Defined (Great Expectations format), not yet executed by the gate |
-| Morning quality gate: scheduled GitHub Actions job (06:00 UTC, weekdays) that triggers the fallback feed on failure | `.github/workflows/morning_quality_gate.yml` | Runs; currently checks only that the expectations file exists |
-| Containerised service with Redis cache | `Dockerfile`, `docker-compose.yml` | Builds and starts the drift monitor next to Redis |
+| Morning quality gate: scheduled GitHub Actions job (06:00 UTC, weekdays) that triggers the fallback feed on failure | `.github/workflows/morning_quality_gate.yml` | Defined; currently checks only that the expectations file exists |
+| Containerised service with Redis cache | `Dockerfile`, `docker-compose.yml` | Defined: runs the drift monitor next to a Redis container |
 | Pricing network: two hidden layers plus a yield-scaled adjustment layer | `src/models/pricing_arch.py` | Forward pass runs; see known issues |
 | Root-cause notebook: gradients of the price with respect to features and yield, to trace a drift incident | `notebooks/root_cause/root_cause_analysis_2026Q2.ipynb` | Code written; the saved output is an import error from an environment without PyTorch |
 
