@@ -73,7 +73,7 @@ Requires Python 3.10+.
 - A feature store. `config/feature_store.yaml` is a Feast-style configuration only and nothing reads it.
 - A real upstream data feed. The gate and the pipelines use simulated data.
 - Authentication, request logging and model versioning beyond the two checkpoint files.
-- Tests of the Docker image. `Dockerfile` and `docker-compose.yml` are provided, but the test suite does not build or run them.
+- Automated tests of the Docker image. The image was built and the compose stack started by hand, and /health, /price and /metrics responded, but the test suite and CI do not build or run it. Port 8000 must be free on the host.
 
 ## Layout
 
