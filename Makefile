@@ -1,10 +1,13 @@
-.PHONY: setup test gate train recalibrate simulate-drift serve run clean
+.PHONY: setup test docker-smoke gate train recalibrate simulate-drift serve run clean
 
 setup:
 	pip install -r requirements.txt
 
 test:
 	python -m pytest -q
+
+docker-smoke:
+	bash scripts/docker_smoke.sh
 
 gate:
 	python pipelines/quality_gate.py --simulate

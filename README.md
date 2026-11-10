@@ -28,7 +28,7 @@ Keeping the yield adjustment in its own layer means it can be recalibrated on it
 | Intraday recalibration | `pipelines/intraday_recalibration.py` | If yield PSI is above 0.25, refits only the yield adjustment layer on recent data and keeps the result only if it lowers the error on a check sample. |
 | Inference service | `src/service/app.py` | FastAPI app: `POST /price`, `GET /health`, `GET /metrics`. |
 | Scheduled gate | `.github/workflows/morning_quality_gate.yml` | Runs the gate at 06:00 UTC on weekdays against a simulated feed and triggers the fallback on failure. |
-| Tests | `tests/`, `.github/workflows/tests.yml` | 34 pytest tests (drift, data quality, model, pipelines, service), run on every push and pull request. The badge above shows the latest result. |
+| Tests | `tests/`, `.github/workflows/tests.yml` | 34 pytest tests (drift, data quality, model, pipelines, service), run on every push and pull request. A second CI job, `scripts/docker_smoke.sh` (also `make docker-smoke`), builds the Docker image, starts the compose stack and checks `/health`, `/price` and `/metrics`. Ports 8000 and 6379 must be free when you run it locally. The badge above shows the latest result. |
 | Root-cause notebook | `notebooks/root_cause/` | Gradients of the price with respect to each input on a drifted sample. |
 
 ## Run it
@@ -73,7 +73,6 @@ Requires Python 3.10+.
 - A feature store. `config/feature_store.yaml` is a Feast-style configuration only and nothing reads it.
 - A real upstream data feed. The gate and the pipelines use simulated data.
 - Authentication, request logging and model versioning beyond the two checkpoint files.
-- Automated tests of the Docker image. The image was built and the compose stack started by hand, and /health, /price and /metrics responded, but the test suite and CI do not build or run it. Port 8000 must be free on the host.
 
 ## Layout
 

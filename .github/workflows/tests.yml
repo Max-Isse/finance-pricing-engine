@@ -21,3 +21,11 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image, start the stack and check the service
+        run: bash scripts/docker_smoke.sh
