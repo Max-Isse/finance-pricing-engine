@@ -1,5 +1,7 @@
 # Finance Pricing Engine: MLOps around a macro-aware pricing model
 
+[![Tests](https://github.com/Max-Isse/finance-pricing-engine/actions/workflows/tests.yml/badge.svg)](https://github.com/Max-Isse/finance-pricing-engine/actions/workflows/tests.yml)
+
 A small pricing model with the production plumbing around it: a data-quality gate, drift monitoring, a fallback feed for when upstream data fails, champion/challenger retraining, intraday recalibration, and a containerised inference service with a Redis metrics cache.
 
 The model is a PyTorch network that prices an instrument from five features and adjusts the price for the 10-year Treasury yield:
@@ -26,7 +28,7 @@ Keeping the yield adjustment in its own layer means it can be recalibrated on it
 | Intraday recalibration | `pipelines/intraday_recalibration.py` | If yield PSI is above 0.25, refits only the yield adjustment layer on recent data and keeps the result only if it lowers the error on a check sample. |
 | Inference service | `src/service/app.py` | FastAPI app: `POST /price`, `GET /health`, `GET /metrics`. |
 | Scheduled gate | `.github/workflows/morning_quality_gate.yml` | Runs the gate at 06:00 UTC on weekdays against a simulated feed and triggers the fallback on failure. |
-| Tests | `tests/`, `.github/workflows/tests.yml` | pytest suite, run on every push and pull request. |
+| Tests | `tests/`, `.github/workflows/tests.yml` | 34 pytest tests (drift, data quality, model, pipelines, service), run on every push and pull request. The badge above shows the latest result. |
 | Root-cause notebook | `notebooks/root_cause/` | Gradients of the price with respect to each input on a drifted sample. |
 
 ## Run it
@@ -71,6 +73,7 @@ Requires Python 3.10+.
 - A feature store. `config/feature_store.yaml` is a Feast-style configuration only and nothing reads it.
 - A real upstream data feed. The gate and the pipelines use simulated data.
 - Authentication, request logging and model versioning beyond the two checkpoint files.
+- Tests of the Docker image. `Dockerfile` and `docker-compose.yml` are provided, but the test suite does not build or run them.
 
 ## Layout
 
