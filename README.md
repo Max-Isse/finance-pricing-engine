@@ -1,53 +1,92 @@
-# Finance Pricing Engine: MLOps scaffolding for a macro-aware pricing model
+# Finance Pricing Engine: MLOps around a macro-aware pricing model
 
-The production plumbing around a pricing model: data-quality gates, drift monitoring, a fallback feed when upstream data fails, and a containerised service with a Redis cache. The pricing model itself is a small PyTorch network whose output is adjusted by a macro input (the 10-year Treasury yield).
+A small pricing model with the production plumbing around it: a data-quality gate, drift monitoring, a fallback feed for when upstream data fails, champion/challenger retraining, intraday recalibration, and a containerised inference service with a Redis metrics cache.
 
-> **Status: work in progress.** The drift monitor, fallback feed and model forward pass run; the CI gate and containers are defined. Retraining, intraday recalibration, the feature store and the tests are placeholders. The table below shows exactly what works today. All data is simulated; nothing here uses real market data.
+The model is a PyTorch network that prices an instrument from five features and adjusts the price for the 10-year Treasury yield:
 
-## What works today
+```
+price = base_head(hidden) + gamma_layer(hidden) × scaled_yield
+```
 
-| Component | File | Status |
+Keeping the yield adjustment in its own layer means it can be recalibrated on its own when the rate regime moves, without retraining the rest of the network.
+
+> **All data is simulated.** Nothing here uses real market data, and the model is a demonstration of the engineering, not a production pricing model.
+
+## What each part does
+
+| Component | File | What it does |
 |---|---|---|
-| Drift monitor: population stability index (PSI) between a baseline and a live feature distribution, written to Redis | `monitoring/drift_monitors.py` | Runs. On its simulated example (yields shifted from 4.1% to 4.9%) it reports PSI ≈ 14.1, far above the usual 0.25 alert level. |
-| Fallback feed: writes a last-known-good market snapshot (10y yield, implied volatility, spread) when upstream data fails | `pipelines/fallback_injector.py` | Runs |
-| Data-quality expectations: 10y yield not null, implied volatility between 2% and 180% | `config/expectations_macro.json` | Defined (Great Expectations format), not yet executed by the gate |
-| Morning quality gate: scheduled GitHub Actions job (06:00 UTC, weekdays) that triggers the fallback feed on failure | `.github/workflows/morning_quality_gate.yml` | Defined; currently checks only that the expectations file exists |
-| Containerised service with Redis cache | `Dockerfile`, `docker-compose.yml` | Defined: runs the drift monitor next to a Redis container |
-| Pricing network: two hidden layers plus a yield-scaled adjustment layer | `src/models/pricing_arch.py` | Forward pass runs; see known issues |
-| Root-cause notebook: gradients of the price with respect to features and yield, to trace a drift incident | `notebooks/root_cause/root_cause_analysis_2026Q2.ipynb` | Code written; the saved output is an import error from an environment without PyTorch |
-
-## Not built yet
-
-- `pipelines/weekly_retrain.py` and `pipelines/intraday_recalibration.py` (empty)
-- Feature store (`config/feature_store.yaml` is a Feast-style configuration only)
-- Tests (`make test` expects `src/tests/`, which does not exist yet)
-- `monitoring/dashboard_layouts.json` and `src/utils/helpers.py` (empty)
-
-## Known issues
-
-- `MacroCalibratedPricingNet` returns one value per hidden unit instead of one price per row: with `hidden_dim=16` the output shape is `(n, 16)`, not `(n, 1)`. The yield adjustment `(n, 1)` is broadcast onto the hidden layer instead of a single base price. A final linear layer to `output_dim` before the adjustment would fix it.
-- The CI gate installs `great_expectations` but does not run the expectation suite yet.
+| Simulated data | `src/data/simulate.py` | Generates instrument features, yields and prices, plus a minute-by-minute macro feed. A `rate_sensitivity` parameter simulates a regime change. |
+| Pricing network | `src/models/pricing_arch.py` | Two hidden layers, a base-price head and a yield adjustment head. Returns one price per row. |
+| Training | `src/models/train.py` | Scaling, training, evaluation (RMSE, MAE) and checkpoints. Can train the whole network or only the yield adjustment layer. |
+| Data-quality gate | `pipelines/quality_gate.py`, `src/quality/expectations.py` | Runs the expectation suite in `config/expectations_macro.json` and a freshness check on the macro feed. Exits non-zero on failure. |
+| Fallback feed | `pipelines/fallback_injector.py` | Writes a last-known-good macro snapshot when the gate fails. |
+| Drift monitor | `monitoring/drift_monitors.py` | Population stability index (PSI) between a baseline and a live sample, classified as stable, moderate or significant. |
+| Weekly retrain | `pipelines/weekly_retrain.py` | Trains a challenger and promotes it only if it beats the current champion on the same holdout. |
+| Intraday recalibration | `pipelines/intraday_recalibration.py` | If yield PSI is above 0.25, refits only the yield adjustment layer on recent data and keeps the result only if it lowers the error on a check sample. |
+| Inference service | `src/service/app.py` | FastAPI app: `POST /price`, `GET /health`, `GET /metrics`. |
+| Scheduled gate | `.github/workflows/morning_quality_gate.yml` | Runs the gate at 06:00 UTC on weekdays against a simulated feed and triggers the fallback on failure. |
+| Tests | `tests/`, `.github/workflows/tests.yml` | pytest suite, run on every push and pull request. |
+| Root-cause notebook | `notebooks/root_cause/` | Gradients of the price with respect to each input on a drifted sample. |
 
 ## Run it
 
 ```bash
 pip install -r requirements.txt
-python monitoring/drift_monitors.py                        # PSI on simulated drift (Redis optional)
-python pipelines/fallback_injector.py --reason "Stale Upstream Data"
-docker-compose up --build -d                               # service plus Redis
+
+make test          # run the test suite
+make gate          # data-quality gate on a simulated feed
+make train         # weekly retrain: writes artifacts/champion.pt
+make simulate-drift  # PSI on a simulated yield shift
+make recalibrate   # intraday recalibration: writes artifacts/intraday.pt
+make serve         # API on http://localhost:8000 (docs at /docs)
 ```
 
-Requires Python 3.10+, PyTorch 2.2, pandas, NumPy, SciPy, Great Expectations 0.18 and redis-py.
+Price one instrument:
+
+```bash
+curl -X POST http://localhost:8000/price \
+  -H "Content-Type: application/json" \
+  -d '{"features": [0.1, -0.2, 0.3, 0.0, 1.0], "treasury_10y_yield": 0.042}'
+```
+
+With Docker (service plus Redis):
+
+```bash
+docker-compose up --build -d
+```
+
+Redis is optional everywhere. Without it the pipelines run normally and skip publishing metrics.
+
+Requires Python 3.10+.
+
+## Design notes
+
+- **Data-quality suite.** `config/expectations_macro.json` keeps the Great Expectations JSON layout, but the gate runs it with a small pandas validator (`src/quality/expectations.py`) so the gate needs only pandas and NumPy. The validator raises an error on any expectation type it doesn't support, so a new check can't be skipped silently.
+- **PSI.** Bins are the baseline's quantiles and the outer bins are open-ended, so live values beyond the baseline's range still count. Empty bins are floored at 0.0001. On the simulated example (yields shifted from 4.1% to 4.9%) the score is about 7.8, far above the 0.25 alert level.
+- **Champion and intraday models.** Recalibration never overwrites the champion. It saves `intraday.pt` next to it, and the service prefers the intraday model when one exists.
+
+## Not included
+
+- A feature store. `config/feature_store.yaml` is a Feast-style configuration only and nothing reads it.
+- A real upstream data feed. The gate and the pipelines use simulated data.
+- Authentication, request logging and model versioning beyond the two checkpoint files.
 
 ## Layout
 
 ```
-src/models/pricing_arch.py     macro-calibrated pricing network (PyTorch)
-monitoring/drift_monitors.py   PSI drift score, pushed to Redis
-pipelines/fallback_injector.py last-known-good market snapshot when upstream data fails
-pipelines/                     weekly retrain and intraday recalibration (planned)
-config/                        data-quality expectations, feature store config
-notebooks/root_cause/          gradient-based root-cause analysis
-.github/workflows/             scheduled morning quality gate
-Dockerfile, docker-compose.yml containerised service with Redis
+src/data/simulate.py             simulated pricing data and macro feed
+src/models/pricing_arch.py       pricing network (PyTorch)
+src/models/train.py              training, evaluation, checkpoints
+src/quality/expectations.py      validator for the expectation suite
+src/service/app.py               FastAPI inference service
+src/utils/helpers.py             paths, seeding, optional Redis metrics
+pipelines/quality_gate.py        morning data-quality gate
+pipelines/fallback_injector.py   last-known-good snapshot
+pipelines/weekly_retrain.py      champion/challenger retrain
+pipelines/intraday_recalibration.py  yield-layer recalibration on drift
+monitoring/drift_monitors.py     PSI drift score
+config/                          expectation suite, feature store config
+notebooks/root_cause/            gradient-based root-cause analysis
+tests/                           pytest suite
 ```

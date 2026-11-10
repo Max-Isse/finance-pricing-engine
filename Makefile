@@ -1,18 +1,29 @@
-.PHONY: setup run test simulate-drift clean
+.PHONY: setup test gate train recalibrate simulate-drift serve run clean
 
 setup:
 	pip install -r requirements.txt
 
+test:
+	python -m pytest -q
+
+gate:
+	python pipelines/quality_gate.py --simulate
+
+train:
+	python pipelines/weekly_retrain.py
+
+recalibrate:
+	python pipelines/intraday_recalibration.py
+
+simulate-drift:
+	python monitoring/drift_monitors.py
+
+serve:
+	uvicorn src.service.app:app --host 0.0.0.0 --port 8000
+
 run:
 	docker-compose up --build -d
 
-test:
-	python -m unittest discover -s src/tests -p "*_test.py"
-
-simulate-drift:
-	@echo "Injecting artificial volatility adjustments into active stream..."
-	python monitoring/drift_monitors.py
-
 clean:
 	docker-compose down -v
-	rm -rf data/*.csv
+	rm -rf data/*.csv artifacts

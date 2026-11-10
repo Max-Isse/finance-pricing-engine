@@ -3,5 +3,7 @@ __pycache__/
 .fin_pricing/
 .venv/
 .ipynb_checkpoints/
+.pytest_cache/
 data/*.csv
+artifacts/
 .env

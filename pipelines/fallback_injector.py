@@ -1,21 +1,35 @@
-import sys
+"""Writes a last-known-good macro snapshot when the upstream feed fails."""
 import argparse
-import pandas as pd
-import numpy as np
+import sys
+from pathlib import Path
 
-def run_fallback(reason):
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.utils.helpers import DATA_DIR, ensure_dir, publish_metrics  # noqa: E402
+
+FALLBACK_FILE = "fallback_hydrated_feed.csv"
+
+# Last-known-good values used when no fresh data is available.
+FALLBACK_SNAPSHOT = {
+    "treasury_10y_yield": 0.0425,
+    "implied_volatility": 0.22,
+    "bid_ask_spread": 0.0005,
+}
+
+
+def run_fallback(reason, output_dir=DATA_DIR):
+    """Write the fallback snapshot to `output_dir` and return the file path."""
     print(f"[FALLBACK LOG] Executing hard override pipeline due to: {reason}")
-    # Simulating data synthesis from last available closing spread
-    mock_timestamp = pd.Timestamp.now()
-    fallback_data = {
-        "timestamp": [mock_timestamp],
-        "treasury_10y_yield": [0.0425], # Hardcoded 4.25% SOFR-adjusted risk-free default
-        "implied_volatility": [0.22],
-        "bid_ask_spread": [0.0005]
-    }
-    df = pd.DataFrame(fallback_data)
-    df.to_csv("data/fallback_hydrated_feed.csv", index=False)
-    print("[FALLBACK LOG] Successfully hydrated data/fallback_hydrated_feed.csv. Ready for opening-bell processing.")
+    frame = pd.DataFrame({"timestamp": [pd.Timestamp.now(tz="UTC")], **{k: [v] for k, v in FALLBACK_SNAPSHOT.items()}})
+    frame["fallback_reason"] = reason
+    path = ensure_dir(output_dir) / FALLBACK_FILE
+    frame.to_csv(path, index=False)
+    publish_metrics({"pipeline_status": "FALLBACK", "fallback_reason": reason})
+    print(f"[FALLBACK LOG] Wrote {path}. Ready for opening-bell processing.")
+    return path
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
